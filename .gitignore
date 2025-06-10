@@ -1,0 +1,36 @@
+# ---- Node.js / Frontend ----
+node_modules/
+.next/
+dist/
+build/
+.env.local
+.env.*.local
+.env
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.vscode/
+.DS_Store
+
+# ---- Go / Lambda Backend ----
+*.exe
+*.out
+*.test
+*.log
+
+# Go workspace
+bin/
+obj/
+
+# Dependency directories (remove if you're using Go modules)
+vendor/
+
+# Go modules
+go.sum
+
+# ---- OS / Editor ----
+*.swp
+*~
+.idea/
+*.iml
