@@ -1,0 +1,81 @@
+# Uploader Service Deployment 
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: uploader-deployment
+spec:
+  replicas: 1 # 1 copy of the application
+  selector:
+    matchLabels:
+      app: uploader
+  template:
+    metadata:
+      labels:
+        app: uploader
+    spec:
+      containers:
+      - name: uploader-container
+        image: klutzyfella/image-uploader:latest # the Docker image 
+        ports:
+        - containerPort: 8080
+        env: # Environment variables for the container
+        - name: S3_BUCKET_NAME
+          value: "nimbus.uploads" # S3 bucket name
+        volumeMounts: # This is how we give the container the AWS credentials
+        - name: aws-credentials
+          mountPath: "/root/.aws"
+          readOnly: true
+      volumes: # This tells K8s where to find the credentials on your host machine
+      - name: aws-credentials
+        hostPath:
+          path: /root/.aws
+
+---
+# Uploader Service Network
+apiVersion: v1
+kind: Service
+metadata:
+  name: uploader-service
+spec:
+  selector:
+    app: uploader # This selector links the Service to the uploader-deployment
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+
+---
+# Worker Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+      - name: worker-container
+        image: klutzyfella/image-processor:latest
+        ports:
+        - containerPort: 8081
+
+---
+# Worker Service Network
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-service
+spec:
+  selector:
+    app: worker
+  ports:
+  - protocol: TCP
+    port: 8081
+    targetPort: 8081

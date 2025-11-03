@@ -16,7 +16,7 @@ yarn-error.log*
 # ---- Go / Lambda Backend ----
 *.exe
 *.out
-*.test
+*-lambda/
 *.log
 
 # Go workspace
@@ -34,3 +34,6 @@ go.sum
 *~
 .idea/
 *.iml
+
+# ---- SSH Key ----
+*.pem
