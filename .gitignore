@@ -16,7 +16,7 @@ yarn-error.log*
 # ---- Go / Lambda Backend ----
 *.exe
 *.out
-*-lambda/
+# *-lambda/
 *.log
 
 # Go workspace
