@@ -4,7 +4,7 @@ kind: Deployment
 metadata:
   name: uploader-deployment
 spec:
-  replicas: 1 # 1 copy of the application
+  replicas: 1 
   selector:
     matchLabels:
       app: uploader
@@ -15,17 +15,17 @@ spec:
     spec:
       containers:
       - name: uploader-container
-        image: klutzyfella/image-uploader:latest # the Docker image 
+        image: klutzyfella/image-uploader:latest
         ports:
         - containerPort: 8080
-        env: # Environment variables for the container
+        env: 
         - name: S3_BUCKET_NAME
-          value: "nimbus.uploads" # S3 bucket name
-        volumeMounts: # This is how we give the container the AWS credentials
+          value: "nimbus.uploads"
+        volumeMounts: 
         - name: aws-credentials
           mountPath: "/root/.aws"
           readOnly: true
-      volumes: # This tells K8s where to find the credentials on your host machine
+      volumes: 
       - name: aws-credentials
         hostPath:
           path: /root/.aws
@@ -38,7 +38,7 @@ metadata:
   name: uploader-service
 spec:
   selector:
-    app: uploader # This selector links the Service to the uploader-deployment
+    app: uploader 
   ports:
   - protocol: TCP
     port: 8080

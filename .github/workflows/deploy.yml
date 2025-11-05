@@ -1,0 +1,57 @@
+# name of workflow
+name: Deploy Nimbus to EC2
+
+# run the workflow on every 'push' event to the 'main' branch.
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  # Build and Push Docker Images
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image-uploader
+        uses: docker/build-push-action@v6
+        with:
+          context: ./image-uploader
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/image-uploader:latest 
+
+      - name: Build and push image-processor
+        uses: docker/build-push-action@v6
+        with:
+          context: ./image-processor
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/image-processor:latest
+
+  # SSH into EC2 and forces Kubernetes to update the app.
+  deploy-to-cluster:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: SSH and deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST_IP }}     
+          username: ${{ secrets.EC2_USER }}   
+          key: ${{ secrets.EC2_SSH_KEY }}     
+
+      - name: Deploy
+        script: |
+            echo "Deploying new version of Nimbus..."
+            
+            sudo k3s kubectl rollout restart deployment uploader-deployment
+            sudo k3s kubectl rollout restart deployment worker-deployment
+            
+            echo "Deployment complete."
