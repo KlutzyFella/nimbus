@@ -27,7 +27,7 @@ obj/
 vendor/
 
 # Go modules
-go.sum
+# go.sum
 
 # ---- OS / Editor ----
 *.swp
