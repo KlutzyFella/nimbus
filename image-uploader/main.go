@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 
 	// AWS
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -23,6 +24,13 @@ import (
 // payload is buffered in memory, so an unbounded body is a trivial
 // denial of service.
 const defaultMaxUploadBytes = 15 << 20 // 15 MiB
+
+// Worker-call defaults. The worker address is a K8s Service DNS name in
+// the cluster and overrideable for local development and tests.
+const (
+	defaultWorkerURL     = "http://worker-service:8081/process"
+	defaultWorkerTimeout = 5 * time.Second
+)
 
 // Struct to parse incoming JSON
 type UploadRequest struct {
@@ -44,6 +52,11 @@ type Server struct {
 	Bucket string
 	// MaxUploadBytes bounds the request body; tests may shrink it.
 	MaxUploadBytes int64
+	// WorkerURL is where the processor is notified; WORKER_URL overrides it.
+	WorkerURL string
+	// Worker bounds the notification call so a hung worker cannot
+	// leak the request goroutine forever.
+	Worker *http.Client
 }
 
 // NewServerFromEnv builds the production Server. It returns an error
@@ -55,10 +68,17 @@ func NewServerFromEnv() (*Server, error) {
 		return nil, fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
 
+	workerURL := os.Getenv("WORKER_URL")
+	if workerURL == "" {
+		workerURL = defaultWorkerURL
+	}
+
 	return &Server{
 		S3:             s3.NewFromConfig(cfg),
 		Bucket:         os.Getenv("S3_BUCKET_NAME"),
 		MaxUploadBytes: defaultMaxUploadBytes,
+		WorkerURL:      workerURL,
+		Worker:         &http.Client{Timeout: defaultWorkerTimeout},
 	}, nil
 }
 
@@ -68,6 +88,32 @@ func SanitizeFilename(filename string) string {
 	re := regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 	sanitized := re.ReplaceAllString(base, "_")
 	return sanitized
+}
+
+// notifyWorker tells the processor about a new object and reports the
+// outcome, so a failure can be surfaced instead of vanishing in a log.
+func (s *Server) notifyWorker(ctx context.Context, bucket, key string) error {
+	workerPayload, err := json.Marshal(map[string]string{"bucket": bucket, "key": key})
+	if err != nil {
+		return fmt.Errorf("encode worker payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.WorkerURL, bytes.NewReader(workerPayload))
+	if err != nil {
+		return fmt.Errorf("build worker request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.Worker.Do(req)
+	if err != nil {
+		return fmt.Errorf("call worker service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("worker service returned %s", resp.Status)
+	}
+	return nil
 }
 
 func (s *Server) uploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -132,15 +178,12 @@ func (s *Server) uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Instead of sending a message to SQS, we now make a direct HTTP call to our worker service.
-	workerPayload := fmt.Sprintf(`{"bucket":"%s", "key":"%s"}`, s.Bucket, sanitizedFileName)
-	go func() {
-		// The URL "http://localhost:8081/process" is for local testing. In Kubernetes, this will be a service name.
-		_, err := http.Post("http://worker-service:8081/process", "application/json", bytes.NewBufferString(workerPayload))
-		if err != nil {
-			log.Printf("Failed to call worker service: %v", err)
-		}
-	}()
+	// Notify the worker synchronously, bounded by the client timeout, so
+	// the outcome is observable. A failure is logged; the response shape
+	// is unchanged by this commit (surfacing it is the next fix).
+	if err := s.notifyWorker(r.Context(), s.Bucket, sanitizedFileName); err != nil {
+		log.Printf("Worker notification failed for s3://%s/%s: %v", s.Bucket, sanitizedFileName, err)
+	}
 
 	// Return the URL of the uploaded file
 	url := fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.Bucket, sanitizedFileName)

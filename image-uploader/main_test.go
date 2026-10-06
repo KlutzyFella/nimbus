@@ -33,7 +33,13 @@ func (f *fakeS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*
 }
 
 func testServer(fake *fakeS3) *Server {
-	return &Server{S3: fake, Bucket: "test-bucket", MaxUploadBytes: defaultMaxUploadBytes}
+	return &Server{
+		S3:             fake,
+		Bucket:         "test-bucket",
+		MaxUploadBytes: defaultMaxUploadBytes,
+		WorkerURL:      "http://127.0.0.1:1/process", // unroutable; worker tests override
+		Worker:         &http.Client{Timeout: defaultWorkerTimeout},
+	}
 }
 
 func postUpload(t *testing.T, srv *Server, payload map[string]string) *httptest.ResponseRecorder {
@@ -99,6 +105,42 @@ func TestOversizedPayloadRejected(t *testing.T) {
 	}
 	if fake.lastKey != "" {
 		t.Errorf("oversized payload reached S3 with key %q", fake.lastKey)
+	}
+}
+
+func TestWorkerNotificationHonorsWorkerURL(t *testing.T) {
+	var hits int
+	var gotBody []byte
+	ws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		gotBody, _ = io.ReadAll(r.Body)
+	}))
+	t.Cleanup(ws.Close)
+
+	// Point the handler at the test worker through the environment.
+	// Pre-fix the handler ignores this and dials a hardcoded K8s DNS
+	// name, so the test worker is never hit.
+	t.Setenv("WORKER_URL", ws.URL+"/process")
+	t.Setenv("S3_BUCKET_NAME", "test-bucket")
+	srv, err := NewServerFromEnv()
+	if err != nil {
+		t.Fatalf("NewServerFromEnv: %v", err)
+	}
+	srv.S3 = &fakeS3{}
+
+	rec := postUpload(t, srv, validPayload("w.txt"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if hits != 1 {
+		t.Fatalf("worker hits = %d, want 1 (WORKER_URL was ignored)", hits)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(gotBody, &payload); err != nil {
+		t.Fatalf("worker body is not JSON: %v", err)
+	}
+	if payload["key"] != "w.txt" || payload["bucket"] == "" {
+		t.Errorf("worker payload = %v, want bucket+key", payload)
 	}
 }
 
