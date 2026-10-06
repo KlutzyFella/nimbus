@@ -18,6 +18,16 @@ yarn-error.log*
 *.out
 # *-lambda/
 *.log
+# Compiled binaries and packaged zips are build outputs, not source
+image-*-lambda/bootstrap
+image-*-lambda/function.zip
+*.zip
+
+# ---- Terraform ----
+*.tfstate
+*.tfstate.*
+.terraform/
+# NOTE: .terraform.lock.hcl is intentionally tracked — do not ignore it.
 
 # Go workspace
 bin/
