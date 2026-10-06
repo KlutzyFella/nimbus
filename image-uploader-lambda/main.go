@@ -27,20 +27,39 @@ type UploadRequest struct {
 	ContentType string `json:"contenttype"`
 }
 
-var s3Client *s3.Client
-var sqsClient *sqs.Client
+// S3Putter and SQSSender are the narrow client subsets the handler needs.
+// The real SDK clients satisfy them; tests substitute fakes.
+type S3Putter interface {
+	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
+}
 
-func init() {
+type SQSSender interface {
+	SendMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error)
+}
+
+// Server holds the handler's dependencies so it is testable without AWS.
+type Server struct {
+	S3       S3Putter
+	SQS      SQSSender
+	Bucket   string
+	QueueURL string
+}
+
+// NewServerFromEnv builds the production Server. It returns an error
+// instead of panicking so main can fail with a clear message.
+func NewServerFromEnv() (*Server, error) {
 	// Load the AWS configuration
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
-		panic("unable to load SDK config, " + err.Error())
+		return nil, fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
 
-	// Create an S3 client
-	s3Client = s3.NewFromConfig(cfg)
-	// Create an SQS client
-	sqsClient = sqs.NewFromConfig(cfg)
+	return &Server{
+		S3:       s3.NewFromConfig(cfg),
+		SQS:      sqs.NewFromConfig(cfg),
+		Bucket:   os.Getenv("S3_BUCKET_NAME"),
+		QueueURL: os.Getenv("SQS_QUEUE_URL"),
+	}, nil
 }
 
 // SanitizeFilename returns a safe filename stripped of path and dangerous characters.
@@ -51,7 +70,7 @@ func SanitizeFilename(filename string) string {
 	return sanitized
 }
 
-func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+func (s *Server) handler(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	headers := map[string]string{
 		"Access-Control-Allow-Origin":  "*",
 		"Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -87,9 +106,8 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 
 	// Upload the file to S3
-	bucketName := os.Getenv("S3_BUCKET_NAME")
-	_, err = s3Client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(bucketName),
+	_, err = s.S3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(s.Bucket),
 		Key:         aws.String(sanitizedFileName),
 		Body:        bytes.NewReader(fileBytes),
 		ContentType: aws.String(contentType),
@@ -100,11 +118,10 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 
 	// Send the file metadata to SQS
-	sqsQueueURL := os.Getenv("SQS_QUEUE_URL")
-	messageBody := fmt.Sprintf(`{"bucket":"%s", "key":"%s"}`, bucketName, sanitizedFileName)
+	messageBody := fmt.Sprintf(`{"bucket":"%s", "key":"%s"}`, s.Bucket, sanitizedFileName)
 
-	_, err = sqsClient.SendMessage(ctx, &sqs.SendMessageInput{
-		QueueUrl:    aws.String(sqsQueueURL),
+	_, err = s.SQS.SendMessage(ctx, &sqs.SendMessageInput{
+		QueueUrl:    aws.String(s.QueueURL),
 		MessageBody: aws.String(messageBody),
 	})
 	if err != nil {
@@ -112,7 +129,7 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 	}
 
 	// Return the URL of the uploaded file
-	url := fmt.Sprintf("https://%s.s3.amazonaws.com/%s", bucketName, sanitizedFileName)
+	url := fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.Bucket, sanitizedFileName)
 	responseBody, _ := json.Marshal(map[string]string{"url": url})
 
 	return events.APIGatewayProxyResponse{
@@ -123,5 +140,9 @@ func handler(ctx context.Context, request events.APIGatewayProxyRequest) (events
 }
 
 func main() {
-	lambda.Start(handler)
+	srv, err := NewServerFromEnv()
+	if err != nil {
+		panic(fmt.Sprintf("failed to configure lambda handler: %v", err))
+	}
+	lambda.Start(srv.handler)
 }
