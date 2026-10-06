@@ -20,6 +20,12 @@ export const metadata: Metadata = {
   description: 'Nimbus',
 }
 
+// Every page depends on Clerk auth at render time (auth() in page.tsx,
+// ClerkProvider in this layout), so nothing here can be statically
+// prerendered. Marking the layout dynamic keeps `next build` from
+// requiring live Clerk keys; running the app still does.
+export const dynamic = 'force-dynamic'
+
 export default function RootLayout({
   children,
 }: Readonly<{

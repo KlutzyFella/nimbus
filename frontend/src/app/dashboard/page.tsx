@@ -75,9 +75,9 @@ function DashboardPage() {
 
       toast.success("Image uploaded successfully!");
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Upload error:", error);
-      toast.error(error.message || "An unknown error occurred.");
+      toast.error(error instanceof Error ? error.message : "An unknown error occurred.");
     } finally {
       setIsUploading(false);
     }
