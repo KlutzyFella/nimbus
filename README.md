@@ -74,9 +74,12 @@ This project's value is in the real-world infrastructure problems I had to solve
 
 This project is the foundation for a fully automated platform.
 
-  * **1. (In Progress) Infrastructure as Code (Terraform)**
+  * **1. Infrastructure as Code (Terraform, partial)**
 
-      * **Goal:** Automate the creation of the entire cloud infrastructure (EC2, IAM Roles, Security Groups, etc.) using Terraform.
+      * **Status:** `main.tf` provisions the EC2 host, IAM role, and
+        security group. It does **not** manage the S3 bucket, the EC2
+        key pair, or any V1 (Lambda/API Gateway/SQS) resources — those
+        are manual prerequisites (see below).
 
   * **2. CI/CD Pipeline (GitHub Actions)**
 
@@ -94,16 +97,59 @@ This project is the foundation for a fully automated platform.
 
 ## ⚙️ How to Deploy (V2 Platform)
 
-1.  **Build & Push Docker Images:**
+> Honesty note: the EC2/K3s steps below are the author's original
+> procedure and were **not** re-run in the hardening pass (they need
+> paid AWS resources). The build, test, and Docker commands were run
+> and are exact.
 
-      * `docker build -t your-id/image-uploader .`
-      * `docker push your-id/image-uploader`
-      * Repeat for `image-processor`
+### Prerequisites (all manual — Terraform does not create these)
+
+  * An S3 bucket for uploads (the manifests default to `nimbus.uploads`).
+    Nothing in this repo creates it — create it first.
+  * An EC2 key pair matching `key_name` in `main.tf` (or change the value).
+  * A free Clerk application for the frontend (see `frontend/.env.example`).
+  * A Docker Hub account; the image name must be identical in
+    `deployment.yaml` (currently `klutzyfella/...`) and the
+    `DOCKERHUB_USERNAME` CI secret, or pods will pull the wrong image.
+
+### Configuration
+
+| Variable | Where | Required | Notes |
+|---|---|---|---|
+| `S3_BUCKET_NAME` | uploader container / Lambda env | yes | Must already exist |
+| `SQS_QUEUE_URL` | uploader Lambda env | yes (V1) | Only the Lambda uses SQS |
+| `WORKER_URL` | uploader container env | no | Defaults to `http://worker-service:8081/process` |
+| `NEXT_PUBLIC_UPLOAD_ENDPOINT` | `frontend/.env.local` | yes | e.g. `http://<EC2_PUBLIC_IP>/upload` |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | `frontend/.env.local` | yes at runtime | Not needed for `npm run build` |
+
+CI secrets (`Settings → Secrets`): `DOCKERHUB_USERNAME`,
+`DOCKERHUB_TOKEN`, `EC2_HOST_IP`, `EC2_USER`, `EC2_SSH_KEY`.
+Note the CI pipeline only runs `rollout restart` — after changing a
+manifest you must still `kubectl apply -f` it yourself.
+
+### How to Run the Tests (verified)
+
+  * Go services: `go test ./...` inside `image-uploader/`,
+    `image-processor/`, `image-uploader-lambda/`,
+    `image-processor-lambda/` (real unit tests exist for the two
+    uploaders; the processors have none yet).
+  * Frontend: `npm install && npm run build` inside `frontend/`
+    (needs no keys; running it needs the Clerk keys above).
+
+### Deploy Steps
+
+1.  **Build & Push Docker Images** (run inside each service directory,
+    e.g. `cd image-uploader`):
+
+      * `docker build -t <your-dockerhub-id>/image-uploader .`
+      * `docker push <your-dockerhub-id>/image-uploader`
+      * Repeat from `image-processor/` for `image-processor`
 
 2.  **Launch EC2 & Install K3s:**
 
       * Launch a `t3.small` (2GB RAM) instance.
-      * Attach an IAM Role with `AmazonS3FullAccess`.
+      * Attach an IAM Role with S3 write access to your upload bucket
+        (the manifests rely on the EC2 role — no credential files).
       * Configure Security Group to allow ports 22 (SSH) and 80 (HTTP).
       * SSH in and run:
         ```bash
@@ -116,7 +162,8 @@ This project is the foundation for a fully automated platform.
 
 3.  **Deploy the Application:**
 
-      * Update `deployment.yaml` and `ingress.yaml` with your correct Docker Hub image names.
+      * Set `S3_BUCKET_NAME` and your Docker Hub image names in
+        `deployment.yaml`.
       * Copy the files to your server (`scp`).
       * Apply the manifests:
         ```bash
@@ -126,5 +173,8 @@ This project is the foundation for a fully automated platform.
 
 4.  **Test:**
 
-      * Find your EC2 instance's public IP and update your Next.js app's `.env.local` file to point to `http://<YOUR_EC2_PUBLIC_IP>/upload`.
-      * Run the frontend and upload a file.
+      * Copy `frontend/.env.example` to `frontend/.env.local` and set
+        `NEXT_PUBLIC_UPLOAD_ENDPOINT=http://<YOUR_EC2_PUBLIC_IP>/upload`
+        plus your Clerk keys.
+      * `cd frontend && npm install && npm run dev`, open the printed
+        URL, and upload a file.
