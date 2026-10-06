@@ -71,6 +71,21 @@ func TestSanitizeFilename(t *testing.T) {
 	}
 }
 
+func TestEmptyFilename(t *testing.T) {
+	// SanitizeFilename("") and (".") both yield ".", which would
+	// otherwise become a nonsense S3 key with a URL ending in "/.".
+	for _, name := range []string{"", "."} {
+		fake := &fakeS3{}
+		rec := postUpload(t, testServer(fake), validPayload(name))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("filename %q: status = %d, want 400 (body: %s)", name, rec.Code, rec.Body.String())
+		}
+		if fake.lastKey != "" {
+			t.Errorf("filename %q: reached S3 with key %q, want no upload", name, fake.lastKey)
+		}
+	}
+}
+
 func TestUploadRoundTrip(t *testing.T) {
 	fake := &fakeS3{}
 	rec := postUpload(t, testServer(fake), validPayload("hello.txt"))

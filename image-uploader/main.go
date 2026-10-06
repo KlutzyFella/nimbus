@@ -93,6 +93,10 @@ func (s *Server) uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Sanitize the filename and get the content type
 	sanitizedFileName := SanitizeFilename(upload.FileName)
+	if sanitizedFileName == "" || sanitizedFileName == "." {
+		http.Error(w, `{"error":"Invalid filename"}`, http.StatusBadRequest)
+		return
+	}
 	contentType := upload.ContentType
 	if contentType == "" {
 		contentType = http.DetectContentType(fileBytes)
