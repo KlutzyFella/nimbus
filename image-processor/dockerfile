@@ -27,7 +27,7 @@ WORKDIR /app
 COPY --from=builder /app/main /app/main
 
 # Tell Docker that the container listens on this port at runtime.
-EXPOSE 8080
+EXPOSE 8081
 
 # The command to run when the container starts.
 CMD ["/app/main"]
