@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -17,6 +18,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
+
+// defaultMaxUploadBytes caps a single upload request body. The whole
+// payload is buffered in memory, so an unbounded body is a trivial
+// denial of service.
+const defaultMaxUploadBytes = 15 << 20 // 15 MiB
 
 // Struct to parse incoming JSON
 type UploadRequest struct {
@@ -36,6 +42,8 @@ type S3Putter interface {
 type Server struct {
 	S3     S3Putter
 	Bucket string
+	// MaxUploadBytes bounds the request body; tests may shrink it.
+	MaxUploadBytes int64
 }
 
 // NewServerFromEnv builds the production Server. It returns an error
@@ -48,8 +56,9 @@ func NewServerFromEnv() (*Server, error) {
 	}
 
 	return &Server{
-		S3:     s3.NewFromConfig(cfg),
-		Bucket: os.Getenv("S3_BUCKET_NAME"),
+		S3:             s3.NewFromConfig(cfg),
+		Bucket:         os.Getenv("S3_BUCKET_NAME"),
+		MaxUploadBytes: defaultMaxUploadBytes,
 	}, nil
 }
 
@@ -77,9 +86,17 @@ func (s *Server) uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Bound the request body: the whole payload is buffered in memory.
+	r.Body = http.MaxBytesReader(w, r.Body, s.MaxUploadBytes)
+
 	// Parse the incoming JSON
 	var upload UploadRequest
 	if err := json.NewDecoder(r.Body).Decode(&upload); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, `{"error":"Payload too large"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
 		return
 	}

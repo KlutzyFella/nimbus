@@ -33,7 +33,7 @@ func (f *fakeS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*
 }
 
 func testServer(fake *fakeS3) *Server {
-	return &Server{S3: fake, Bucket: "test-bucket"}
+	return &Server{S3: fake, Bucket: "test-bucket", MaxUploadBytes: defaultMaxUploadBytes}
 }
 
 func postUpload(t *testing.T, srv *Server, payload map[string]string) *httptest.ResponseRecorder {
@@ -83,6 +83,22 @@ func TestEmptyFilename(t *testing.T) {
 		if fake.lastKey != "" {
 			t.Errorf("filename %q: reached S3 with key %q, want no upload", name, fake.lastKey)
 		}
+	}
+}
+
+func TestOversizedPayloadRejected(t *testing.T) {
+	// One MiB over the 15 MiB default request cap. Must be rejected
+	// before anything is buffered into S3.
+	fake := &fakeS3{}
+	payload := validPayload("big.bin")
+	payload["filedata"] = strings.Repeat("A", 16<<20)
+	rec := postUpload(t, testServer(fake), payload)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want 413 (body: %.120s)", rec.Code, rec.Body.String())
+	}
+	if fake.lastKey != "" {
+		t.Errorf("oversized payload reached S3 with key %q", fake.lastKey)
 	}
 }
 
