@@ -179,15 +179,19 @@ func (s *Server) uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Notify the worker synchronously, bounded by the client timeout, so
-	// the outcome is observable. A failure is logged; the response shape
-	// is unchanged by this commit (surfacing it is the next fix).
+	// the outcome is observable. The S3 upload already succeeded, so the
+	// status stays 200 with a real URL — but a notification failure is
+	// disclosed as a warning instead of vanishing into a log line.
+	response := map[string]string{}
 	if err := s.notifyWorker(r.Context(), s.Bucket, sanitizedFileName); err != nil {
 		log.Printf("Worker notification failed for s3://%s/%s: %v", s.Bucket, sanitizedFileName, err)
+		response["warning"] = "uploaded, but the processor was not notified"
 	}
 
 	// Return the URL of the uploaded file
 	url := fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.Bucket, sanitizedFileName)
-	responseBody, _ := json.Marshal(map[string]string{"url": url})
+	response["url"] = url
+	responseBody, _ := json.Marshal(response)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

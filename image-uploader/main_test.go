@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -141,6 +142,78 @@ func TestWorkerNotificationHonorsWorkerURL(t *testing.T) {
 	}
 	if payload["key"] != "w.txt" || payload["bucket"] == "" {
 		t.Errorf("worker payload = %v, want bucket+key", payload)
+	}
+}
+
+func TestWorkerFailureSurfacedAsWarning(t *testing.T) {
+	// testServer's default WorkerURL is unroutable, so notification
+	// fails fast. The upload itself succeeds, so the status stays 200
+	// with a real URL — but the failure must be disclosed, not hidden.
+	srv := testServer(&fakeS3{})
+	rec := postUpload(t, srv, validPayload("w.txt"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	var got map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if got["url"] == "" {
+		t.Errorf("response lost the url on worker failure: %v", got)
+	}
+	if got["warning"] == "" {
+		t.Errorf("response hides the worker failure (no warning): %v", got)
+	}
+}
+
+func TestWorkerSuccessHasNoWarning(t *testing.T) {
+	ws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(ws.Close)
+
+	srv := testServer(&fakeS3{})
+	srv.WorkerURL = ws.URL
+	rec := postUpload(t, srv, validPayload("w.txt"))
+
+	var got map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if _, ok := got["warning"]; ok {
+		t.Errorf("healthy worker produced a warning: %v", got)
+	}
+	if got["url"] == "" {
+		t.Errorf("response has no url: %v", got)
+	}
+}
+
+func TestHangingWorkerBoundedByTimeout(t *testing.T) {
+	// A worker that never answers must not hold the upload open: the
+	// client timeout bounds the call and the failure is reported.
+	unblock := make(chan struct{})
+	ws := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-unblock:
+		}
+	}))
+	t.Cleanup(func() { close(unblock); ws.Close() })
+
+	srv := testServer(&fakeS3{})
+	srv.WorkerURL = ws.URL
+	start := time.Now()
+	rec := postUpload(t, srv, validPayload("w.txt"))
+	elapsed := time.Since(start)
+
+	if elapsed > 30*time.Second {
+		t.Errorf("hung worker held the request for %v; timeout did not fire", elapsed)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("response is not JSON: %v", err)
+	}
+	if got["warning"] == "" {
+		t.Errorf("hung worker produced no warning: %v", got)
 	}
 }
 
