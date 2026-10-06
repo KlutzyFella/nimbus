@@ -117,20 +117,24 @@ func (s *Server) handler(ctx context.Context, request events.APIGatewayProxyRequ
 		return events.APIGatewayProxyResponse{StatusCode: 500, Headers: headers, Body: `{"error":"Upload failed"}`}, nil
 	}
 
-	// Send the file metadata to SQS
+	// Send the file metadata to SQS. The S3 upload already succeeded, so
+	// the status stays 200 with a real URL — but a queue failure is
+	// disclosed as a warning instead of vanishing into a log line.
 	messageBody := fmt.Sprintf(`{"bucket":"%s", "key":"%s"}`, s.Bucket, sanitizedFileName)
-
+	response := map[string]string{}
 	_, err = s.SQS.SendMessage(ctx, &sqs.SendMessageInput{
 		QueueUrl:    aws.String(s.QueueURL),
 		MessageBody: aws.String(messageBody),
 	})
 	if err != nil {
 		fmt.Printf("Failed to send message to SQS: %v\n", err)
+		response["warning"] = "uploaded, but the processor was not notified"
 	}
 
 	// Return the URL of the uploaded file
 	url := fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.Bucket, sanitizedFileName)
-	responseBody, _ := json.Marshal(map[string]string{"url": url})
+	response["url"] = url
+	responseBody, _ := json.Marshal(response)
 
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
