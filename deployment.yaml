@@ -21,14 +21,6 @@ spec:
         env: 
         - name: S3_BUCKET_NAME
           value: "nimbus.uploads"
-        volumeMounts: 
-        - name: aws-credentials
-          mountPath: "/root/.aws"
-          readOnly: true
-      volumes: 
-      - name: aws-credentials
-        hostPath:
-          path: /root/.aws
 
 ---
 # Uploader Service Network
