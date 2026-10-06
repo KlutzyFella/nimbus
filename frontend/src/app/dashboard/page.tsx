@@ -24,10 +24,16 @@ function DashboardPage() {
     toast.success("URL copied to clipboard!");
   };
 
-  // Handles a file upload by sending it to a lambda endpoint.
+  // Handles a file upload by sending it to the upload endpoint.
   const handleFileUpload = async (files: File[]) => {
     const file = files[0];
     if (!file) return;
+
+    const uploadEndpoint = process.env.NEXT_PUBLIC_UPLOAD_ENDPOINT;
+    if (!uploadEndpoint) {
+      toast.error("Upload endpoint is not configured (NEXT_PUBLIC_UPLOAD_ENDPOINT).");
+      return;
+    }
 
     setIsUploading(true);
     setImageUrl(null); // Reset previous URL
@@ -54,7 +60,7 @@ function DashboardPage() {
         contenttype: file.type,
       };
 
-      const response = await fetch(process.env.NEXT_PUBLIC_UPLOAD_ENDPOINT!, {
+      const response = await fetch(uploadEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -131,26 +137,13 @@ function DashboardPage() {
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-gray-900 mb-4">Welcome to Nimbus</h2>
             <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-              Convert your images to public URLs with blazing fast speed!
+              Convert your images to public URLs.
             </p>
           </div>
 
 
           {/* File Upload Section */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-            {/* <div className="p-6 border-b border-gray-100">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center justify-center w-10 h-10 bg-blue-100 rounded-lg">
-                  <Cloud className="w-5 h-5 text-blue-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Upload File</h3>
-                  <p className="text-sm text-gray-600">
-                    {isUploading ? "Your file is being uploaded..." : "Drag and drop or click to browse"}
-                  </p>
-                </div>
-              </div>
-            </div> */}
 
             {/* Conditionally render FileUpload or Loading indicator */}
             <div className="p-6">
@@ -187,8 +180,8 @@ function DashboardPage() {
             </div>
           )}
 
-          {/* Stats & Recent Activity Sections */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+          {/* Stats Section */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
             <div className="bg-white rounded-xl border border-gray-200 p-6 text-center hover:shadow-md transition-shadow">
               <div className="text-2xl font-bold text-blue-600 mb-2">{uploadedFiles.length}</div>
               <div className="text-sm text-gray-600">Files Uploaded</div>
@@ -196,10 +189,6 @@ function DashboardPage() {
             <div className="bg-white rounded-xl border border-gray-200 p-6 text-center hover:shadow-md transition-shadow">
               <div className="text-2xl font-bold text-green-600 mb-2">{formatBytes(totalStorageUsed)}</div>
               <div className="text-sm text-gray-600">Storage Used</div>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-200 p-6 text-center hover:shadow-md transition-shadow">
-              <div className="text-2xl font-bold text-purple-600 mb-2"></div>
-              <div className="text-sm text-gray-600">Shared Files</div>
             </div>
           </div>
 
