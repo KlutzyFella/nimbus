@@ -12,10 +12,8 @@ The original version of Nimbus. Designed for rapid development, zero server mana
 
   * **Frontend:** Next.js, Tailwind CSS, Clerk (for auth), Shadcn UI
   * **Backend:** AWS Lambda (Go) & API Gateway
-  * **Database:** Amazon S3
-  * **Flow:** The Next.js app calls an API Gateway endpoint, which triggers a Go Lambda function. The function uploads the file to S3 and returns the URL.
-
-[Image of a serverless architecture diagram to be exported here from figma]
+  * **Storage:** Amazon S3 (object storage; there is no database in this project)
+  * **Flow:** The Next.js app calls an API Gateway endpoint, which triggers a Go Lambda function. The function uploads the file to S3 and returns the URL. It also sends the object key to SQS; the processor Lambda currently only logs the message — no image transformation is implemented yet.
 
 -----
 
@@ -23,7 +21,9 @@ The original version of Nimbus. Designed for rapid development, zero server mana
 
 This is the advanced version, built to learn and demonstrate the fundamentals of infrastructure, orchestration, and networking that managed services hide. The goal was to build the *platform* itself.
 
-  * **Application:** Go microservices (`net/http` servers)
+  * **Application:** Go microservices (`net/http` servers). The processor
+      service currently logs the notification and replies OK — it performs
+      no image processing yet (see Roadmap).
   * **Containerization:** Docker
   * **Orchestration:** Kubernetes (K3s)
   * **Cloud:** AWS EC2 (t3.small), S3, IAM Roles
